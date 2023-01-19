@@ -150,3 +150,101 @@ void free_simple_tiledsurf(MyPaintSurface *surface)
     free(self);
 }
 
+
+// Naive conversion code from the internal MyPaint format and 8 bit RGB
+void
+fix15_to_rgba8(uint16_t *src, uint8_t *dst, int length)
+{
+    for (int i = 0; i < length; i++) {
+      uint32_t r, g, b, a;
+
+      r = *src++;
+      g = *src++;
+      b = *src++;
+      a = *src++;
+
+      // un-premultiply alpha (with rounding)
+      if (a != 0) {
+        r = ((r << 15) + a/2) / a;
+        g = ((g << 15) + a/2) / a;
+        b = ((b << 15) + a/2) / a;
+      } else {
+        r = g = b = 0;
+      }
+
+      // Variant A) rounding
+      const uint32_t add_r = (1<<15)/2;
+      const uint32_t add_g = (1<<15)/2;
+      const uint32_t add_b = (1<<15)/2;
+      const uint32_t add_a = (1<<15)/2;
+
+      *dst++ = (r * 255 + add_r) / (1<<15);
+      *dst++ = (g * 255 + add_g) / (1<<15);
+      *dst++ = (b * 255 + add_b) / (1<<15);
+      *dst++ = (a * 255 + add_a) / (1<<15);
+    }
+}
+
+// Utility code for writing out scanline-based formats like PPM
+typedef void (*LineChunkCallback) (uint16_t *chunk, int chunk_length, void *user_data);
+
+/* Iterate over chunks of data in the MyPaintTiledSurface,
+    starting top-left (0,0) and stopping at bottom-right (width-1,height-1)
+    callback will be called with linear chunks of horizontal data, up to MYPAINT_TILE_SIZE long
+*/
+void
+iterate_over_line_chunks(MyPaintTiledSurface * tiled_surface, int height, int width,
+                         LineChunkCallback callback, void *img)
+{
+    const int tile_size = MYPAINT_TILE_SIZE;
+    const int number_of_tile_rows = (height / tile_size) + 1*(height % tile_size != 0);
+    const int tiles_per_row = (width / tile_size) + 1*(width % tile_size != 0);
+
+    MyPaintTileRequest *requests = (MyPaintTileRequest *)malloc(tiles_per_row * sizeof(MyPaintTileRequest));
+    uint8_t *_img = img;
+
+    for (int ty = 0; ty < number_of_tile_rows; ty++) {
+
+        // Fetch all horizontal tiles in current tile row
+        for (int tx = 0; tx < tiles_per_row; tx++ ) {
+            MyPaintTileRequest *req = &requests[tx];
+            mypaint_tile_request_init(req, 0, tx, ty, TRUE);
+            mypaint_tiled_surface_tile_request_start(tiled_surface, req);
+        }
+
+        // For each pixel line in the current tile row, fire callback
+        const int max_y = (ty < number_of_tile_rows - 1 || height % tile_size == 0) ? tile_size : height % tile_size;
+        for (int y = 0; y < max_y; y++) {
+            for (int tx = 0; tx < tiles_per_row; tx++) {
+	      const int y_offset = y * tile_size * 4; // 4 channels
+                const int chunk_length = (tx < tiles_per_row - 1 || width % tile_size == 0) ? tile_size : width % tile_size;
+                callback(requests[tx].buffer + y_offset, chunk_length, _img);
+                _img = _img + MYPAINT_TILE_SIZE * 4;
+            }
+        }
+
+        // Complete tile requests on current tile row
+        for (int tx = 0; tx > tiles_per_row; tx++ ) {
+            mypaint_tiled_surface_tile_request_end(tiled_surface, &requests[tx]);
+        }
+
+    }
+
+    free(requests);
+}
+
+static void
+add_chunk(uint16_t *chunk, int chunk_length, uint8_t *img)
+{
+    // WritePPMUserData data = *(WritePPMUserData *)user_data;
+    // uint8_t chunk_8bit[MYPAINT_TILE_SIZE * 4]; // 4 channels
+    fix15_to_rgba8(chunk, img, chunk_length);
+}
+
+void mypaint_fixed_tiled_surface_as_uint8(MyPaintFixedTiledSurface *self, uint8_t *img) {
+    const int width = mypaint_fixed_tiled_surface_get_width(self);
+    const int height = mypaint_fixed_tiled_surface_get_height(self);
+    iterate_over_line_chunks((MyPaintTiledSurface *)self,
+                             height, width,
+                             add_chunk, img);
+}

@@ -26,6 +26,8 @@ int
 mypaint_fixed_tiled_surface_get_height(MyPaintFixedTiledSurface *self);
 
 
+void mypaint_fixed_tiled_surface_as_uint8(MyPaintFixedTiledSurface *self, uint8_t *img);
+
 MyPaintSurface *
 mypaint_fixed_tiled_surface_interface(MyPaintFixedTiledSurface *self);
 
