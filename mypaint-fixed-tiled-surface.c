@@ -219,7 +219,7 @@ iterate_over_line_chunks(MyPaintTiledSurface * tiled_surface, int height, int wi
 	      const int y_offset = y * tile_size * 4; // 4 channels
                 const int chunk_length = (tx < tiles_per_row - 1 || width % tile_size == 0) ? tile_size : width % tile_size;
                 callback(requests[tx].buffer + y_offset, chunk_length, _img);
-                _img = _img + MYPAINT_TILE_SIZE * 4;
+                _img = _img + chunk_length * 4;
             }
         }
 
